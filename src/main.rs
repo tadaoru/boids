@@ -1,12 +1,11 @@
 use bevy::{math::Vec3, prelude::*};
 use bevy_egui::{egui, EguiContext, EguiPlugin, EguiSettings};
 use rand::Rng;
-use std::f32::consts::PI;
+use std::{f32::consts::PI, fmt};
 
-const THR: usize = 32;
-const BOIDS_COUNT: usize = 1024 * 1;
+const THR: usize = 16;
+const BOIDS_COUNT: usize = 1024;
 const BOIDS_RADIUS: f32 = 0.01;
-const INITIAL_BOIDS_PROPERTY: usize = 0;
 
 fn restrict_vector_length(vector: Vec3, min: f32, max: f32) -> Vec3 {
     let len = vector.length();
@@ -34,13 +33,28 @@ fn partial_max(a: f32, b: f32, c: f32) -> f32 {
 }
 
 struct UIState {
-    property_combo_item: usize,
+    selected_property_idx: i32,
+}
+
+impl UIState {
+    const DEFAULT_PROPERTY_IDX: usize = 0;
+    const PROPERTY_STR: [&str; 6] = ["Git", "Book 1", "Book 2", "Book 3", "Book 4", "Book 5"];
+}
+
+impl fmt::Display for UIState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            Self::PROPERTY_STR[self.selected_property_idx as usize]
+        )
+    }
 }
 
 impl Default for UIState {
     fn default() -> Self {
         Self {
-            property_combo_item: INITIAL_BOIDS_PROPERTY,
+            selected_property_idx: Self::DEFAULT_PROPERTY_IDX as i32,
         }
     }
 }
@@ -56,6 +70,7 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(BoidProperty::default())
+        .insert_resource(UIState::default())
         .add_plugins(DefaultPlugins)
         .add_plugin(EguiPlugin)
         .add_startup_system(setup_scene)
@@ -189,7 +204,7 @@ struct BoidProperty {
 
 impl Default for BoidProperty {
     fn default() -> Self {
-        Self::from_ui(&BoidPropertyUI::PREDEFINED[INITIAL_BOIDS_PROPERTY])
+        Self::from_ui(&BoidPropertyUI::PREDEFINED[UIState::DEFAULT_PROPERTY_IDX])
     }
 }
 
@@ -353,53 +368,34 @@ fn interact_boids(
         }
         let delta2 = -delta1;
 
-        //let angle1 = (v1.dot(delta1) / (v1.length() * delta1.length())).acos();
-        //let angle2 = (v2.dot(delta2) / (v2.length() * delta2.length())).acos();
         let angle1_cos = v1.dot(delta1) / (v1.length() * delta1.length());
         let angle2_cos = v2.dot(delta2) / (v2.length() * delta2.length());
 
-        if angle1_cos > prop.coh_angle_cos && angle1_cos.acos() > prop.coh_angle_cos.acos()
-            || angle1_cos < prop.coh_angle_cos && angle1_cos.acos() < prop.coh_angle_cos.acos()
-        {
-            println!("angle cos {}, angle acos {}", angle1_cos, angle1_cos.acos());
-            println!(
-                "prop cos {}, prop acos {}",
-                prop.coh_angle_cos,
-                prop.coh_angle_cos.acos()
-            );
-        }
-
         if dist_sq < prop.coh_dist_sq {
-            //if angle1 < prop.coh_angle {
             if angle1_cos > prop.coh_angle_cos {
                 corrf1.coh.0 += 1;
                 corrf1.coh.1 += delta1;
             }
-            //if angle2 < prop.coh_angle {
             if angle2_cos > prop.coh_angle_cos {
                 corrf2.coh.0 += 1;
                 corrf2.coh.1 += delta2;
             }
         }
         if dist_sq < prop.sep_dist_sq {
-            //if angle1 < prop.sep_angle {
             if angle1_cos > prop.sep_angle_cos {
                 corrf1.coh.0 += 1;
                 corrf1.coh.1 += -delta1;
             }
-            //if angle2 < prop.sep_angle {
             if angle2_cos > prop.sep_angle_cos {
                 corrf2.coh.0 += 1;
                 corrf2.coh.1 += -delta2;
             }
         }
         if dist_sq < prop.ali_dist_sq {
-            //if angle1 < prop.ali_angle {
             if angle1_cos > prop.ali_angle_cos {
                 corrf1.coh.0 += 1;
                 corrf1.coh.1 += *v2 - *v1;
             }
-            //if angle2 < prop.ali_angle {
             if angle2_cos > prop.ali_angle_cos {
                 corrf2.coh.0 += 1;
                 corrf2.coh.1 += *v1 - *v2
@@ -450,24 +446,31 @@ fn integrate(
     });
 }
 
-fn treat_ui(mut ui_state: Local<UIState>, mut egui_ctx: ResMut<EguiContext>, mut prop: ResMut<BoidProperty>) {
+fn treat_ui(
+    mut egui_ctx: ResMut<EguiContext>,
+    mut prop: ResMut<BoidProperty>,
+    mut ui_state: ResMut<UIState>,
+) {
+    let bpui = &BoidPropertyUI::PREDEFINED[ui_state.selected_property_idx as usize];
     egui::Window::new("Boid property")
         .vscroll(true)
         .show(egui_ctx.ctx_mut(), |ui| {
-            ui.add(egui::Slider::new(&mut prop.coh_force, 0.001..=0.05).text("Cohesion force"));
-            ui.add(egui::Slider::new(&mut prop.sep_force, 0.01..=0.6).text("Separation force"));
-            ui.add(egui::Slider::new(&mut prop.ali_force, 0.01..=0.1).text("Alignment force"));
-            egui::ComboBox::from_label("Load preconfigured settings...")
-                .selected_text(ui_state.property_combo_item.to_string())
+            egui::ComboBox::from_label("Configuration")
+                .selected_text(format!("{}", *ui_state))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(preconfigured, 0, "First");
-                    ui.selectable_value(preconfigured, 1, "Second");
-                    ui.selectable_value(preconfigured, 2, "Third");
-                    ui.selectable_value(preconfigured, 3, "Fourth");
-                    ui.selectable_value(preconfigured, 4, "Fifth");
-                    ui.selectable_value(preconfigured, 5, "Sixth");
+                    for (i, s) in UIState::PROPERTY_STR.into_iter().enumerate() {
+                        ui.selectable_value(&mut ui_state.selected_property_idx, i as i32, s);
+                    }
                 });
+
+            ui.separator();
+            ui.label("Forces");
+            ui.label(format!(" cohesion: {}", bpui.coh_force));
+            ui.label(format!(" separation: {}", bpui.sep_force));
+            ui.label(format!(" alignment: {}", bpui.ali_force));
         });
+
+    *prop = BoidProperty::from_ui(bpui);
 }
 
 fn update_ui_scale_factor(
